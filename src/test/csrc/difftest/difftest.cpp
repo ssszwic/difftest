@@ -22,13 +22,18 @@
 #include "flash.h"
 #include "spikedasm.h"
 #include "refproxy.h"
+#ifdef CONFIG_DIFFTEST_SQUASH
+#include "svdpi.h"
+#endif // CONFIG_DIFFTEST_SQUASH
 
 Difftest **difftest = NULL;
 
 int difftest_init() {
+  diffstate_buffer_init();
   difftest = new Difftest*[NUM_CORES];
   for (int i = 0; i < NUM_CORES; i++) {
     difftest[i] = new Difftest(i);
+    difftest[i]->dut = diffstate_buffer[i].get(0);
   }
   return 0;
 }
@@ -53,8 +58,23 @@ int difftest_state() {
   return -1;
 }
 
+int difftest_nstep(int step){
+  int last_trap_code = STATE_RUNNING;
+  for(int i = 0; i < step; i++){
+    if(difftest_step()){
+      last_trap_code = STATE_ABORT;
+      return last_trap_code;
+    }
+    last_trap_code = difftest_state();
+    if(last_trap_code != STATE_RUNNING)
+      return last_trap_code;
+  }
+  return last_trap_code;
+}
+
 int difftest_step() {
   for (int i = 0; i < NUM_CORES; i++) {
+    difftest[i]->dut = diffstate_buffer[i].next();
     int ret = difftest[i]->step();
     if (ret) {
       return ret;
@@ -63,13 +83,20 @@ int difftest_step() {
   return 0;
 }
 
-void difftest_trace() {
+void difftest_trace_read() {
   for (int i = 0; i < NUM_CORES; i++) {
-    difftest[i]->trace();
+    difftest[i]->trace_read();
+  }
+}
+
+void difftest_trace_write(int step) {
+  for(int i = 0; i < NUM_CORES; i++) {
+    difftest[i]->trace_write(step);
   }
 }
 
 void difftest_finish() {
+  diffstate_buffer_free();
   for (int i = 0; i < NUM_CORES; i++) {
     delete difftest[i];
   }
@@ -77,16 +104,26 @@ void difftest_finish() {
   difftest = NULL;
 }
 
+#ifdef CONFIG_DIFFTEST_SQUASH
+extern "C" void set_squash_enable(int enable);
+void difftest_squash_set(int enable, const char *scope_name = "TOP.SimTop.SquashEndpoint.control") {
+  auto scope = svGetScopeFromName(scope_name);
+  if (scope == NULL) {
+    printf("Error: Could not retrieve scope with name '%s'\n", scope_name);
+    assert(scope);
+  }
+  svSetScope(scope);
+  set_squash_enable(rand());
+}
+#endif // CONFIG_DIFFTEST_SQUASH
+
 Difftest::Difftest(int coreid) : id(coreid) {
   state = new DiffState();
-
-  dut = (DiffTestState *)calloc(batch_size, sizeof(DiffTestState));
 }
 
 Difftest::~Difftest() {
   delete state;
   delete difftrace;
-  free(dut);
   if (proxy) {
     delete proxy;
   }

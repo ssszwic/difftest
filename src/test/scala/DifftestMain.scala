@@ -17,6 +17,7 @@
 package difftest
 
 import chisel3._
+import chisel3.stage._
 
 // Main class to generate difftest modules when design is not written in chisel.
 class DifftestTop extends Module {
@@ -48,4 +49,10 @@ class DifftestTop extends Module {
   val difftest_runahead_redirect_event = DifftestModule(new DiffRunaheadRedirectEvent, dontCare = true)
 
   DifftestModule.finish("demo")
+}
+
+object DifftestMain extends App {
+  (new ChiselStage).execute(args, Seq(
+      ChiselGeneratorAnnotation(() => new DifftestTop))
+  )
 }
