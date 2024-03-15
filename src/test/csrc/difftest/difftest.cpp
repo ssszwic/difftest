@@ -592,49 +592,43 @@ int Difftest::do_store_check() {
 // cacheid: 0 -> icache
 //          1 -> dcache
 //          2 -> pagecache
-//          3 -> icache PIQ refill ipf
-//          4 -> icache mainPipe port0 toIFU
-//          5 -> icache mainPipe port1 toIFU
-//          6 -> icache ipf refill cache
-//          7 -> icache mainPipe port0 read PIQ
-//          8 -> icache mainPipe port1 read PIQ
+//          3 -> icache mainPipe port0 toIFU
+//          4 -> icache mainPipe port1 toIFU
 int Difftest::do_refill_check(int cacheid) {
 #ifdef CONFIG_DIFFTEST_REFILLEVENT
   auto dut_refill = &(dut->refill[cacheid]);
   if (!dut_refill->valid) {
     return 0;
   }
+  // data len is half of cacheline for mainPipe
+  int len = 8;
+  if(cacheid == 3 || cacheid == 4) len = 4;
   dut_refill->valid = 0;
-  static int delay = 0;
-  delay = delay * 2;
-  if (delay > 16) { return 1; }
   static uint64_t last_valid_addr = 0;
   char buf[512];
   uint64_t realpaddr = dut_refill->addr;
-  dut_refill->addr = dut_refill->addr - dut_refill->addr % 64;
+  dut_refill->addr = dut_refill->addr - dut_refill->addr % (len * 8);
   if (dut_refill->addr != last_valid_addr) {
     last_valid_addr = dut_refill->addr;
     if(!in_pmem(dut_refill->addr)){
       // speculated illegal mem access should be ignored
       return 0;
     }
-    for (int i = 0; i < 8; i++) {
+    for (int i = 0; i < len; i++) {
       read_goldenmem(dut_refill->addr + i*8, &buf, 8);
       if (dut_refill->data[i] != *((uint64_t*)buf)) {
         printf("cacheid=%d,idtfr=%d,realpaddr=0x%lx: Refill test failed!\n",cacheid, dut_refill->idtfr, realpaddr);
         printf("addr: %lx\nGold: ", dut_refill->addr);
-        for (int j = 0; j < 8; j++) {
+        for (int j = 0; j < len; j++) {
           read_goldenmem(dut_refill->addr + j*8, &buf, 8);
           printf("%016lx", *((uint64_t*)buf));
         }
         printf("\nCore: ");
-        for (int j = 0; j < 8; j++) {
+        for (int j = 0; j < len; j++) {
           printf("%016lx", dut_refill->data[j]);
         }
         printf("\n");
-        // continue run some cycle before aborted to dump wave
-        if (delay == 0) { delay = 1; }
-        return 0;
+        return 1;
       }
     }
   }
@@ -646,8 +640,8 @@ int Difftest::do_irefill_check() {
     int r = 0;
     r |= do_refill_check(ICACHEID);
     // r |= do_refill_check(3);
-    // r |= do_refill_check(4);
-    // r |= do_refill_check(5);
+    r |= do_refill_check(3);
+    r |= do_refill_check(4);
     // r |= do_refill_check(6);
     // r |= do_refill_check(7);
     // r |= do_refill_check(8);
